@@ -1,7 +1,9 @@
+mod mods;
+
 use std::env;
 
 use actix_web::middleware;
-use actix_web::{get, post, web, App, HttpResponse, HttpServer, Responder};
+use actix_web::{web, App, HttpResponse, HttpServer, Responder};
 use service::sea_orm::{Database, DatabaseConnection};
 
 struct AppState {
@@ -30,6 +32,7 @@ pub async fn start() -> std::io::Result<()> {
         App::new()
             .app_data(app_state.clone())
             .wrap(middleware::Logger::default())
+            .default_service(web::route().to(not_found))
             .configure(init)
     })
     .bind(("127.0.0.1", port))?
@@ -38,21 +41,9 @@ pub async fn start() -> std::io::Result<()> {
 }
 
 fn init(cfg: &mut web::ServiceConfig) {
-    cfg.service(hello);
-    cfg.service(echo);
-    cfg.route("/hey", web::get().to(manual_hello));
+    cfg.service(web::scope("/mods").configure(mods::init));
 }
 
-#[get("/")]
-async fn hello() -> impl Responder {
-    HttpResponse::Ok().body("Hello world!")
-}
-
-#[post("/echo")]
-async fn echo(req_body: String) -> impl Responder {
-    HttpResponse::Ok().body(req_body)
-}
-
-async fn manual_hello() -> impl Responder {
-    HttpResponse::Ok().body("Hey there!")
+async fn not_found() -> impl Responder {
+    HttpResponse::NotFound().body("Not found")
 }

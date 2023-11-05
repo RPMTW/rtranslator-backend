@@ -9,6 +9,8 @@ use ferinth::{
 };
 use serde::{Deserialize, Serialize};
 
+use crate::minecraft::version;
+
 #[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(rename_all = "lowercase")]
 pub enum ArchiveProvider {
@@ -24,6 +26,19 @@ pub struct ArchiveResourceInfo {
     pub image_url: Option<String>,
     pub page_url: String,
     pub included_in_database: bool,
+}
+
+pub struct ModDownloadInfo {
+    pub url: String,
+    pub size: usize,
+    pub loader: ModLoader,
+    pub game_version: String,
+}
+
+pub enum ModLoader {
+    Fabric,
+    Forge,
+    Quilt,
 }
 
 fn create_ferinth_client() -> ferinth::Result<Ferinth> {
@@ -83,17 +98,19 @@ pub async fn validate_resource_identifier(
     }
 }
 
-pub async fn fetch_download_urls(
+pub async fn fetch_downloads(
     provider: &ArchiveProvider,
     identifier: &str,
-) -> ferinth::Result<HashSet<String>> {
-    match provider {
-        ArchiveProvider::CurseForge => fetch_curseforge_download_urls(identifier).await,
-        ArchiveProvider::Modrinth => fetch_modrinth_download_urls(identifier).await,
-    }
+) -> ferinth::Result<Vec<(String, usize)>> {
+    let result = match provider {
+        ArchiveProvider::CurseForge => unimplemented!(),
+        ArchiveProvider::Modrinth => fetch_modrinth_downloads(identifier).await,
+    };
+
+    result.map(|urls| urls.into_iter().collect())
 }
 
-async fn fetch_modrinth_download_urls(identifier: &str) -> ferinth::Result<HashSet<String>> {
+async fn fetch_modrinth_downloads(identifier: &str) -> ferinth::Result<HashSet<(String, usize)>> {
     let client = create_ferinth_client()?;
     let project = client.get_project(identifier).await?;
 
@@ -104,26 +121,27 @@ async fn fetch_modrinth_download_urls(identifier: &str) -> ferinth::Result<HashS
         }
     }
 
-    let all_versions = client.list_versions(identifier).await?;
-    let mut urls: HashSet<String> = HashSet::new();
+    let version_list = client.list_versions(identifier).await?;
+    let mut downloads: HashSet<(String, usize)> = HashSet::new();
 
     for (loader, game_ver) in version_filters {
-        let versions = all_versions
+        if !version::is_stable(game_ver) {
+            continue;
+        }
+
+        let versions = version_list
             .iter()
             .filter(|ver| ver.loaders.contains(loader) && ver.game_versions.contains(game_ver));
         let latest_version = versions.max_by_key(|ver| ver.date_published);
 
         if let Some(ver) = latest_version {
+            // TODO
             let file = ver.files.iter().find(|x| x.primary).or(ver.files.first());
             if let Some(file) = file {
-                urls.insert(file.url.to_string());
+                downloads.insert((file.url.to_string(), file.size));
             }
         }
     }
 
-    Ok(urls)
-}
-
-async fn fetch_curseforge_download_urls(identifier: &str) -> ferinth::Result<HashSet<String>> {
-    unimplemented!()
+    Ok(downloads)
 }

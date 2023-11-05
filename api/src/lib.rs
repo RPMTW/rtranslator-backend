@@ -25,10 +25,12 @@ pub async fn start() -> std::io::Result<()> {
     } else {
         8080
     };
-
+    
     let db = Database::connect(&db_url)
         .await
         .expect("Failed to connect to database");
+    println!("Successfully connected to database");
+
     let app_state = web::Data::new(Mutex::new(AppState { db }));
 
     println!("Starting server at http://localhost:{}", port);

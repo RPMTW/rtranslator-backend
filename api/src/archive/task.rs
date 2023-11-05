@@ -1,33 +1,9 @@
-use std::{collections::HashMap, sync::Mutex};
-
 use actix_web::{error, get, post, web};
-use lazy_static::lazy_static;
-use serde::{Deserialize, Serialize};
-use service::archive::resource::{
-    fetch_download_urls, validate_resource_identifier, ArchiveProvider,
+use serde::Deserialize;
+use service::archive::{
+    resource::{fetch_downloads, validate_resource_identifier, ArchiveProvider},
+    task::{download_files, extract_files, ArchiveTask, ArchiveTaskStage, ARCHIVE_TASKS},
 };
-
-lazy_static! {
-    pub static ref ARCHIVE_TASKS: Mutex<HashMap<String, ArchiveTask>> = Mutex::new(HashMap::new());
-}
-
-#[derive(Debug, Serialize, Clone)]
-pub struct ArchiveTask {
-    pub stage: ArchiveTaskStage,
-    pub progress: f32,
-}
-
-#[derive(Debug, Serialize, Clone)]
-#[serde(rename_all = "lowercase")]
-pub enum ArchiveTaskStage {
-    Preparing,
-    Downloading,
-    Extracting,
-    Parsing,
-    Saving,
-    Completed,
-    Failed,
-}
 
 #[derive(Debug, Deserialize)]
 pub struct CreateTaskPayload {
@@ -80,12 +56,19 @@ pub async fn create_archive_task(
 
     let task_id_clone = task_id.clone();
     tokio::spawn(async move {
-        start_create_task(
-            task_id_clone,
+        let result = start_create_task(
+            task_id_clone.clone(),
             payload.provider.clone(),
             payload.identifier.clone(),
         )
         .await;
+
+        if let Err(err) = result {
+            let mut tasks = ARCHIVE_TASKS.lock().unwrap();
+            let task = tasks.get_mut(&task_id_clone).unwrap();
+            task.stage = ArchiveTaskStage::Failed;
+            println!("Execute archive task failed: {:?}", err);
+        }
     });
 
     Ok(task_id)
@@ -105,14 +88,42 @@ pub async fn get_archive_task(
     }
 }
 
-async fn start_create_task(task_id: String, provider: ArchiveProvider, identifier: String) {
-    let download_urls = fetch_download_urls(&provider, &identifier).await;
+async fn start_create_task(
+    task_id: String,
+    provider: ArchiveProvider,
+    identifier: String,
+) -> anyhow::Result<()> {
+    let downloads = fetch_downloads(&provider, &identifier).await?;
     {
         let mut tasks = ARCHIVE_TASKS.lock().unwrap();
         let task = tasks.get_mut(&task_id).unwrap();
         task.stage = ArchiveTaskStage::Downloading;
-        task.progress = 0.1;
+        task.progress = 0.05;
     }
 
-    // unimplemented!()
+    let file_locations = download_files(&task_id, downloads).await?;
+    {
+        let mut tasks = ARCHIVE_TASKS.lock().unwrap();
+        let task = tasks.get_mut(&task_id).unwrap();
+        task.stage = ArchiveTaskStage::Extracting;
+        task.progress = 0.55;
+    }
+
+    let result = extract_files(file_locations).await?;
+    {
+        let mut tasks = ARCHIVE_TASKS.lock().unwrap();
+        let task = tasks.get_mut(&task_id).unwrap();
+        task.stage = ArchiveTaskStage::Saving;
+        task.progress = 0.9;
+    }
+
+    // save
+    {
+        let mut tasks = ARCHIVE_TASKS.lock().unwrap();
+        let task = tasks.get_mut(&task_id).unwrap();
+        task.stage = ArchiveTaskStage::Completed;
+        task.progress = 1.0;
+    }
+
+    Ok(())
 }

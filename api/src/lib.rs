@@ -1,12 +1,15 @@
-mod mods;
+mod archive;
 
 use std::env;
+use std::sync::Mutex;
 
+use actix_cors::Cors;
 use actix_web::middleware;
+use actix_web::web::Data;
 use actix_web::{web, App, HttpResponse, HttpServer, Responder};
 use service::sea_orm::{Database, DatabaseConnection};
 
-struct AppState {
+pub struct AppState {
     db: DatabaseConnection,
 }
 
@@ -26,12 +29,14 @@ pub async fn start() -> std::io::Result<()> {
     let db = Database::connect(&db_url)
         .await
         .expect("Failed to connect to database");
-    let app_state = web::Data::new(AppState { db });
+    let app_state = web::Data::new(Mutex::new(AppState { db }));
 
+    println!("Starting server at http://localhost:{}", port);
     HttpServer::new(move || {
         App::new()
-            .app_data(app_state.clone())
+            .app_data(Data::clone(&app_state))
             .wrap(middleware::Logger::default())
+            .wrap(Cors::permissive())
             .default_service(web::route().to(not_found))
             .configure(init)
     })
@@ -41,7 +46,7 @@ pub async fn start() -> std::io::Result<()> {
 }
 
 fn init(cfg: &mut web::ServiceConfig) {
-    cfg.service(web::scope("/mods").configure(mods::init));
+    cfg.service(web::scope("/archives").configure(archive::init));
 }
 
 async fn not_found() -> impl Responder {

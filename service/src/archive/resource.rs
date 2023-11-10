@@ -158,7 +158,7 @@ async fn fetch_modrinth_downloads(identifier: &str) -> anyhow::Result<HashSet<Mo
                         "forge" => ModLoader::Forge,
                         "neoforge" => ModLoader::Forge,
                         "quilt" => ModLoader::Quilt,
-                        _ => anyhow::bail!("Unknown loader: {}", loader),
+                        _ => continue,
                     },
                     game_version: version::to_semver(game_ver)?,
                     path: dir.join(Uuid::new_v4().to_string()),

@@ -8,8 +8,7 @@ pub fn is_stable(version: &str) -> bool {
 }
 
 pub fn to_semver(version: &str) -> anyhow::Result<semver::Version> {
-    let re = regex::Regex::new(GAME_VERSION_REGEX).unwrap();
-    if re.is_match(version) {
+    if is_stable(version) {
         let mut parts = version.split('.');
 
         let major = parts

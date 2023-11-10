@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     env::temp_dir,
     fs::{self, create_dir_all},
     io::BufReader,
@@ -7,11 +7,17 @@ use std::{
     sync::Mutex,
 };
 
+use entity::{
+    entry::text_entry,
+    minecraft::mod_loader::{ModLoader, ModLoaderVec},
+    misc::StringVec,
+};
 use lazy_static::lazy_static;
+use sea_orm::{sea_query::OnConflict, DatabaseConnection, EntityTrait, Set};
 use serde::Serialize;
-use uuid::Uuid;
-use zip::{read::ZipFile, ZipArchive};
+use zip::ZipArchive;
 
+use super::resource::ModDownloadInfo;
 use crate::minecraft::metadata::{parse_language_file, parse_namespace};
 
 lazy_static! {
@@ -33,53 +39,89 @@ pub enum ArchiveTaskStage {
     Saving,
     Completed,
     Failed,
+    // Timeout,
+}
+
+impl ArchiveTaskStage {
+    pub fn is_finished(&self) -> bool {
+        matches!(self, ArchiveTaskStage::Completed | ArchiveTaskStage::Failed)
+    }
+}
+
+pub fn get_archives_directory() -> PathBuf {
+    temp_dir().join("rtranslator-backend").join("archives")
+}
+
+pub fn update_task_progress(task_id: &str, stage: Option<ArchiveTaskStage>, progress: f32) {
+    let mut tasks = ARCHIVE_TASKS.lock().unwrap();
+    let task = tasks.get_mut(task_id).unwrap();
+
+    if let Some(stage) = stage {
+        task.stage = stage;
+    }
+    task.progress = progress;
+}
+
+pub fn remove_task(task_id: &str) {
+    let mut tasks = ARCHIVE_TASKS.lock().unwrap();
+    tasks.remove(task_id);
 }
 
 pub async fn download_files(
-    task_id: &str,
-    downloads: Vec<(String, usize)>,
-) -> anyhow::Result<Vec<PathBuf>> {
-    let total_size: usize = downloads.iter().map(|(_, size)| size).sum();
+    downloads: &[ModDownloadInfo],
+    max_simultaneous_downloads: usize,
+    progress_changed: impl Fn(f32),
+) -> anyhow::Result<()> {
+    let total_size: usize = downloads.iter().map(|x| x.size).sum();
     let mut downloaded_size = 0;
-    let mut file_locations: Vec<PathBuf> = Vec::new();
 
-    let dir = temp_dir().join("rtranslator-backend").join("archives");
-    create_dir_all(&dir)?;
+    create_dir_all(get_archives_directory())?;
 
-    for chuck in downloads.chunks(10) {
-        let mut handles = Vec::new();
-        for (url, size) in chuck {
-            let dir = dir.clone();
-            let url = url.clone();
-            let size = *size;
+    for chuck in downloads.chunks(max_simultaneous_downloads) {
+        let mut handles = Vec::with_capacity(chuck.len());
+
+        for (index, info) in chuck.iter().enumerate() {
+            let url = info.url.clone();
+            let path = info.path.clone();
 
             let handle = tokio::spawn(async move {
                 let bytes = reqwest::get(url).await?.bytes().await?;
+                tokio::fs::write(path, bytes).await?;
 
-                let path = dir.join(Uuid::new_v4().to_string());
-
-                tokio::fs::write(&path, bytes).await?;
-                Ok::<_, anyhow::Error>((path, size))
+                Ok::<_, anyhow::Error>(index)
             });
             handles.push(handle);
         }
 
         for handle in handles {
-            let (path, size) = handle.await??;
-            file_locations.push(path);
-            downloaded_size += size;
+            let index = handle.await??;
+            let info = chuck.get(index).unwrap();
 
-            let mut tasks = ARCHIVE_TASKS.lock().unwrap();
-            let task = tasks.get_mut(task_id).unwrap();
-            let download_progress = downloaded_size as f32 / total_size as f32;
-            task.progress = 0.05 + download_progress * 0.5;
+            downloaded_size += info.size;
+            progress_changed(downloaded_size as f32 / total_size as f32);
         }
     }
 
-    Ok(file_locations)
+    Ok(())
 }
 
-pub async fn extract_files(locations: Vec<PathBuf>) -> anyhow::Result<()> {
+#[derive(Debug)]
+pub struct TextEntryData {
+    pub key: String,
+    pub value: String,
+    pub namespaces: HashSet<String>,
+    pub game_versions: HashSet<semver::Version>,
+    pub loaders: HashSet<ModLoader>,
+}
+
+pub async fn parse_language_files(
+    downloads: &[ModDownloadInfo],
+    progress_changed: impl Fn(f32),
+) -> anyhow::Result<Vec<TextEntryData>> {
+    let locations = downloads.iter().map(|x| x.path.clone());
+    let mut maps = Vec::new();
+    let mut namespaces = Vec::new();
+
     for location in locations {
         let file = fs::File::open(&location)?;
         let reader = BufReader::new(&file);
@@ -90,12 +132,95 @@ pub async fn extract_files(locations: Vec<PathBuf>) -> anyhow::Result<()> {
             let file_name = format!("assets/{}/lang/en_us.json", namespace);
             if let Ok(mut file) = archive.by_name(&file_name) {
                 let map = parse_language_file(&mut file)?;
-                println!("Map: {:?}", map);
+                maps.push(map);
+                namespaces.push(namespace);
             }
         }
 
         fs::remove_file(location)?;
     }
 
+    let keys = maps
+        .iter()
+        .flat_map(|x| x.keys())
+        .collect::<HashSet<_>>()
+        .into_iter();
+    let keys_len = keys.len();
+    let mut entries = Vec::with_capacity(keys_len);
+
+    for (index, key) in keys.enumerate() {
+        let filtered_maps = maps
+            .iter()
+            .enumerate()
+            .filter(|(_, map)| map.contains_key(key))
+            .collect::<Vec<_>>();
+
+        let latest_value = filtered_maps.last().unwrap().1.get(key).unwrap();
+        let mut data = TextEntryData {
+            key: key.clone(),
+            value: latest_value.to_string(),
+            namespaces: HashSet::new(),
+            game_versions: HashSet::new(),
+            loaders: HashSet::new(),
+        };
+
+        for (index, _) in filtered_maps {
+            let namespace = namespaces.get(index).unwrap();
+            let download_info = downloads.get(index).unwrap();
+
+            data.namespaces.insert(namespace.clone());
+            data.game_versions
+                .insert(download_info.game_version.clone());
+            data.loaders.insert(download_info.loader.clone());
+        }
+
+        entries.push(data);
+        progress_changed(index as f32 / keys_len as f32);
+    }
+
+    Ok(entries)
+}
+
+pub async fn save_text_entries(
+    db: &DatabaseConnection,
+    entries: Vec<TextEntryData>,
+    mod_id: i32,
+) -> Result<(), sea_orm::DbErr> {
+    let mut models = Vec::with_capacity(entries.len());
+
+    for entry in entries {
+        let model = text_entry::ActiveModel {
+            key: Set(entry.key),
+            value: Set(entry.value),
+            namespaces: Set(StringVec(entry.namespaces.into_iter().collect())),
+            game_versions: Set(StringVec(
+                entry
+                    .game_versions
+                    .into_iter()
+                    .map(|x| x.to_string())
+                    .collect(),
+            )),
+            loaders: Set(ModLoaderVec(entry.loaders.into_iter().collect())),
+            mod_id: Set(mod_id),
+        };
+
+        models.push(model);
+    }
+
+    for chuck in models.chunks(1000).map(|chunk| chunk.to_vec()) {
+        text_entry::Entity::insert_many(chuck)
+            .on_conflict(
+                OnConflict::column(text_entry::Column::Key)
+                    .update_columns([
+                        text_entry::Column::Value,
+                        text_entry::Column::Namespaces,
+                        text_entry::Column::GameVersions,
+                        text_entry::Column::Loaders,
+                    ])
+                    .to_owned(),
+            )
+            .exec(db)
+            .await?;
+    }
     Ok(())
 }

@@ -12,6 +12,8 @@ pub struct Model {
     pub id: i32,
     pub status: ModStatus,
 
+    pub name: Option<String>,
+
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

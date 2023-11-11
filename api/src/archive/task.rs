@@ -25,16 +25,15 @@ pub struct CreateTaskPayload {
 }
 
 #[post("/tasks")]
-/**
- * Creates a new archive task.
- *
- * Payload:
- *   provider: ArchiveProvider
- *   identifier: String
- *
- * Response:
- *   String: Task ID
- */
+/// Creates a new archive task, then executes it in a background thread.
+/// If the task is already running, the task ID will be returned.
+///
+/// ### Payload
+/// * provider: ArchiveProvider
+/// * identifier: String
+///
+/// ### Response
+/// * String: Task ID
 pub async fn create_archive_task(
     state: web::Data<AppState>,
     payload: web::Json<CreateTaskPayload>,
@@ -92,6 +91,17 @@ pub async fn create_archive_task(
     Ok(task_id)
 }
 
+/// Returns the archive task with the given ID.
+/// If the task is finished, it will be removed from the task list.
+///
+/// ### Path parameters
+/// * task_id: String
+///
+/// ### Response
+/// * ArchiveTask
+///
+/// ### Errors
+/// * 404: Task not found
 #[get("/tasks/{task_id}")]
 pub async fn get_archive_task(
     task_id: web::Path<String>,

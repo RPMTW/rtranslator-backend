@@ -1,5 +1,6 @@
 mod archive;
 mod config;
+mod minecraft_mod;
 
 use actix_cors::Cors;
 use actix_web::middleware;
@@ -20,7 +21,7 @@ pub async fn start() -> std::io::Result<()> {
     std::env::set_var("RUST_LOG", "debug");
     tracing_subscriber::fmt::init();
 
-    dotenvy::dotenv().unwrap();
+    dotenvy::dotenv().ok();
     let config = ServerConfig::load();
 
     let db = Database::connect(&config.database_url)
@@ -52,6 +53,7 @@ pub async fn start() -> std::io::Result<()> {
 
 fn init(cfg: &mut web::ServiceConfig) {
     cfg.service(web::scope("/archives").configure(archive::init));
+    cfg.service(web::scope("/mods").configure(minecraft_mod::init));
 }
 
 async fn not_found() -> impl Responder {

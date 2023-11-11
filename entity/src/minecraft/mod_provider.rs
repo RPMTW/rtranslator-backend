@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::database_initializer::DatabaseInitializer;
 
+use super::minecraft_mod;
+
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "mod_provider")]
 pub struct Model {
@@ -53,10 +55,25 @@ impl ActiveModelBehavior for ActiveModel {
 
         Ok(self)
     }
+
+    async fn after_save<C>(model: Model, db: &C, _: bool) -> Result<Model, DbErr>
+    where
+        C: ConnectionTrait,
+    {
+        let mc_mod = model.find_related(minecraft_mod::Entity).one(db).await?;
+        if let Some(mc_mod) = mc_mod {
+            let mut mc_mod: minecraft_mod::ActiveModel = mc_mod.into();
+            mc_mod.name = Set(Some(model.display_name.clone()));
+            mc_mod.update(db).await?;
+        }
+
+        Ok(model)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Hash, EnumIter, DeriveActiveEnum)]
 #[sea_orm(rs_type = "String", db_type = "Enum", enum_name = "mod_provider_type")]
+#[serde(rename_all = "lowercase")]
 pub enum ModProviderType {
     #[sea_orm(string_value = "CurseForge")]
     CurseForge,

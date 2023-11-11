@@ -1,7 +1,6 @@
+use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use sea_orm::{
-    entity::prelude::*, prelude::async_trait::async_trait, DatabaseBackend, Schema, Set, Statement,
-};
+use sea_orm::{entity::prelude::*, DatabaseBackend, Schema, Set, Statement};
 use serde::{Deserialize, Serialize};
 
 use crate::database_initializer::DatabaseInitializer;
@@ -55,6 +54,7 @@ impl ActiveModelBehavior for ActiveModel {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Hash, EnumIter, DeriveActiveEnum)]
 #[sea_orm(rs_type = "String", db_type = "Enum", enum_name = "mod_status")]
+#[serde(rename_all = "snake_case")]
 pub enum ModStatus {
     #[sea_orm(string_value = "Normal")]
     Normal,

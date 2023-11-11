@@ -56,7 +56,8 @@ pub async fn create_archive_task(
     );
     let task = ArchiveTask {
         stage: ArchiveTaskStage::Preparing,
-        progress: 0.0,
+        progress: 0.05,
+        mc_mod: None,
     };
 
     {
@@ -122,17 +123,17 @@ async fn start_create_task(
     downloads.sort_by(|a, b| a.game_version.cmp(&b.game_version));
 
     // Downloading mod files.
-    update_task_progress(&task_id, Some(ArchiveTaskStage::Downloading), 0.05);
+    update_task_progress(&task_id, Some(ArchiveTaskStage::Downloading), 0.1);
 
     download_files(&downloads, max_simultaneous_downloads, |progress| {
-        update_task_progress(&task_id, None, 0.05 + progress * 0.6)
+        update_task_progress(&task_id, None, 0.1 + progress * 0.75)
     })
     .await?;
 
     // Extracting and parsing language files.
     update_task_progress(&task_id, Some(ArchiveTaskStage::Extracting), 0.55);
     let text_entries = parse_language_files(&downloads, |progress| {
-        update_task_progress(&task_id, None, 0.65 + progress * 0.3)
+        update_task_progress(&task_id, None, 0.85 + progress * 0.1)
     })
     .await?;
 
@@ -143,6 +144,10 @@ async fn start_create_task(
     create_provider_model(&db, &provider, identifier, mc_mod.id).await?;
     save_text_entries(&db, text_entries, mc_mod.id).await?;
 
-    update_task_progress(&task_id, Some(ArchiveTaskStage::Completed), 1.0);
+    let mut tasks = ARCHIVE_TASKS.lock().unwrap();
+    let task = tasks.get_mut(&task_id).unwrap();
+    task.stage = ArchiveTaskStage::Completed;
+    task.progress = 1.0;
+    task.mc_mod = Some(mc_mod);
     Ok(())
 }

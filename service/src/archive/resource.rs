@@ -61,9 +61,10 @@ fn create_ferinth_client() -> ferinth::Result<Ferinth> {
 }
 
 pub async fn search_modrinth_mods(
+    db: &DatabaseConnection,
     query: Option<&String>,
     page: Option<usize>,
-) -> ferinth::Result<Vec<ArchiveResourceInfo>> {
+) -> anyhow::Result<Vec<ArchiveResourceInfo>> {
     let client = create_ferinth_client()?;
     let page = page.unwrap_or(0);
 
@@ -79,16 +80,24 @@ pub async fn search_modrinth_mods(
         .hits;
     let mut mods: Vec<ArchiveResourceInfo> = Vec::with_capacity(hits.len());
 
-    hits.iter().for_each(|hit| {
+    for hit in hits {
+        let identifier = hit.project_id.to_string();
+
+        let included_in_database =
+            mod_provider::Entity::find_by_id((ModProviderType::Modrinth, identifier.clone()))
+                .one(db)
+                .await?
+                .is_some();
+
         mods.push(ArchiveResourceInfo {
-            identifier: Some(hit.project_id.to_string()),
+            identifier: Some(identifier),
             name: hit.title.clone(),
             description: Some(hit.description.clone()),
             image_url: hit.icon_url.clone().map(|url| url.to_string()),
             page_url: format!("https://modrinth.com/mod/{}", hit.project_id),
-            included_in_database: false,
+            included_in_database,
         });
-    });
+    }
 
     Ok(mods)
 }
@@ -229,6 +238,7 @@ pub async fn create_provider_model(
                 image_url: Set(project.icon_url.map(|url| url.to_string())),
                 page_url: Set(format!("https://modrinth.com/mod/{}", project.id)),
                 mod_id: Set(mod_id),
+                ..Default::default()
             }
         }
     };

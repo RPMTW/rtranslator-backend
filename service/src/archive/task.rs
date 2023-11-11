@@ -9,7 +9,7 @@ use std::{
 
 use entity::{
     entry::text_entry,
-    minecraft::mod_loader::{ModLoader, ModLoaderVec},
+    minecraft::{mod_loader::{ModLoader, ModLoaderVec}, minecraft_mod},
     misc::StringVec,
 };
 use lazy_static::lazy_static;
@@ -28,10 +28,13 @@ lazy_static! {
 pub struct ArchiveTask {
     pub stage: ArchiveTaskStage,
     pub progress: f32,
+
+    // This field is only set when the task is completed.
+    pub mc_mod: Option<minecraft_mod::Model>,
 }
 
 #[derive(Debug, Serialize, Clone)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "snake_case")]
 pub enum ArchiveTaskStage {
     Preparing,
     Downloading,

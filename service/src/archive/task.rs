@@ -18,7 +18,7 @@ use serde::Serialize;
 use zip::ZipArchive;
 
 use super::resource::ModDownloadInfo;
-use crate::minecraft::metadata::{parse_language_file, parse_namespace};
+use crate::minecraft::file_metadata::{parse_language_file, parse_namespace};
 
 lazy_static! {
     pub static ref ARCHIVE_TASKS: Mutex<HashMap<String, ArchiveTask>> = Mutex::new(HashMap::new());

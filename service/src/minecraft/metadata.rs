@@ -1,45 +1,58 @@
-use std::{
-    collections::HashMap,
-    fs::File,
-    io::{BufReader, Read},
+use std::collections::HashMap;
+
+use entity::minecraft::{
+    minecraft_mod::{self, ModStatus},
+    mod_provider::{self, ModProviderType},
 };
+use sea_orm::{DatabaseConnection, DbErr, EntityTrait, ModelTrait, QueryOrder};
+use serde::Serialize;
 
-use anyhow::Context;
-use zip::{read::ZipFile, ZipArchive};
-
-pub fn parse_namespace(archive: &mut ZipArchive<BufReader<&File>>) -> anyhow::Result<String> {
-    let fabric_file = archive.by_name("fabric.mod.json");
-    if let Ok(mut file) = fabric_file {
-        let mut content = String::new();
-        file.read_to_string(&mut content)?;
-        let json_value = serde_json::from_str::<serde_json::Value>(&content)?;
-
-        let namespace = json_value
-            .get("id")
-            .context("Failed to get namespace")?
-            .as_str();
-        if let Some(namespace) = namespace {
-            return Ok(namespace.to_string());
-        }
-    }
-
-    // TODO: Parse forge, quark, etc.
-
-    Err(anyhow::anyhow!("Failed to parse namespace"))
+#[derive(Debug, Serialize)]
+pub struct ModMetadata {
+    pub id: i32,
+    pub status: ModStatus,
+    pub name: String,
+    pub description: String,
+    pub image_url: Option<String>,
+    pub page_url: HashMap<ModProviderType, String>,
 }
 
-pub fn parse_language_file(file: &mut ZipFile) -> anyhow::Result<HashMap<String, String>> {
-    let mut content = String::new();
-    file.read_to_string(&mut content)?;
-    let json_value = serde_json::from_str::<serde_json::Value>(&content)?;
+impl ModMetadata {
+    pub async fn from_model(model: minecraft_mod::Model, db: &DatabaseConnection) -> Option<Self> {
+        let providers = model
+            .find_related(mod_provider::Entity)
+            .order_by_desc(mod_provider::Column::UpdatedAt)
+            .all(db)
+            .await
+            .ok()?;
+        // Prefer the latest updated mod provider information.
+        let preferred_provider = providers.first()?;
 
-    let mut map: HashMap<String, String> = HashMap::new();
-
-    for (key, value) in json_value.as_object().unwrap() {
-        if let Some(value) = value.as_str() {
-            map.insert(key.to_string(), value.to_string());
-        }
+        Some(ModMetadata {
+            id: model.id,
+            status: model.status,
+            name: model
+                .name
+                .unwrap_or(preferred_provider.display_name.clone()),
+            description: preferred_provider.description.clone(),
+            image_url: preferred_provider.image_url.clone(),
+            page_url: providers
+                .into_iter()
+                .map(|provider| (provider.provider_type, provider.page_url))
+                .collect(),
+        })
     }
+}
 
-    Ok(map)
+pub async fn lookup_mod_metadata(
+    db: &DatabaseConnection,
+    mod_id: i32,
+) -> Result<Option<ModMetadata>, DbErr> {
+    let model = minecraft_mod::Entity::find_by_id(mod_id).one(db).await?;
+
+    if let Some(model) = model {
+        Ok(ModMetadata::from_model(model, db).await)
+    } else {
+        Ok(None)
+    }
 }

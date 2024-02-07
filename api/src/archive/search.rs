@@ -1,4 +1,5 @@
 use actix_web::{get, web};
+use log::warn;
 use serde::Deserialize;
 use service::archive::resource::{self, ArchiveProvider, ArchiveResourceInfo};
 
@@ -21,8 +22,11 @@ pub async fn search_resources(
 
     match result {
         Ok(mods) => Ok(web::Json(mods)),
-        Err(_) => Err(actix_web::error::ErrorInternalServerError(
-            "Failed to search mods from archive source provider.",
-        )),
+        Err(e) => {
+            warn!("Failed to search mods from archive source provider: {:?}", e);
+            Err(actix_web::error::ErrorInternalServerError(
+                "Failed to search mods from archive source provider.",
+            ))
+        }
     }
 }

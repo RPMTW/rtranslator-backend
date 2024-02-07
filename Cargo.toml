@@ -10,3 +10,4 @@ members = [".", "api", "entity", "service"]
 
 [dependencies]
 api = { path = "api" }
+log = "0.4.20"

@@ -1,4 +1,5 @@
 use actix_web::{get, web};
+use log::warn;
 use serde::{Deserialize, Serialize};
 use service::minecraft::{
     metadata::ModMetadata,
@@ -30,7 +31,7 @@ pub async fn search_mods(
     match result {
         Ok((total_pages, mods)) => Ok(web::Json(SearchModResponse { total_pages, mods })),
         Err(err) => {
-            println!("Failed to search mods: {}", err);
+            warn!("Failed to search mods: {}", err);
             Err(actix_web::error::ErrorInternalServerError(
                 "Failed to search mods",
             ))
@@ -66,7 +67,7 @@ pub async fn search_mod_entries(
             entries,
         })),
         Err(err) => {
-            println!("Failed to search entries for specific mod: {}", err);
+            warn!("Failed to search entries for specific mod: {}", err);
             Err(actix_web::error::ErrorInternalServerError(
                 "Failed to search entries for specific mod",
             ))

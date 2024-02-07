@@ -1,6 +1,7 @@
 use std::thread;
 
 use actix_web::{error, get, post, web};
+use log::warn;
 use serde::Deserialize;
 use service::{
     archive::{
@@ -84,7 +85,7 @@ pub async fn create_archive_task(
             let mut tasks = ARCHIVE_TASKS.lock().unwrap();
             let task = tasks.get_mut(&task_id_clone).unwrap();
             task.stage = ArchiveTaskStage::Failed;
-            println!("Execute archive task failed: {:?}", err);
+            warn!("Execute archive task failed: {:?}", err);
         }
     });
 

@@ -1,6 +1,7 @@
 mod search;
 
 use actix_web::{get, web};
+use log::warn;
 use service::minecraft::metadata::{lookup_mod_metadata, ModMetadata};
 
 use crate::AppState;
@@ -22,7 +23,7 @@ pub async fn get_mod_metadata(
         Ok(Some(metadata)) => Ok(web::Json(metadata)),
         Ok(None) => Err(actix_web::error::ErrorNotFound("Mod not found")),
         Err(err) => {
-            println!("Failed to get mod metadata: {}", err);
+            warn!("Failed to get mod metadata: {}", err);
             Err(actix_web::error::ErrorInternalServerError(
                 "Failed to get mod metadata",
             ))

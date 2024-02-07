@@ -1,2 +1,3 @@
-# rtranslator-backend
+# RTranslator Backend
  
+Database Type: SQLite

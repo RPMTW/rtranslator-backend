@@ -1,9 +1,7 @@
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use sea_orm::{entity::prelude::*, DatabaseBackend, Schema, Set, Statement};
+use sea_orm::{entity::prelude::*, Set};
 use serde::{Deserialize, Serialize};
-
-use crate::database_initializer::DatabaseInitializer;
 
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "minecraft_mod")]
@@ -63,13 +61,4 @@ pub enum ModStatus {
     /// The mod is missing translatable entries.
     #[sea_orm(string_value = "MissingEntries")]
     MissingEntries,
-}
-
-impl DatabaseInitializer for Entity {
-    fn initialize(builder: &DatabaseBackend) -> Statement {
-        let schema = Schema::new(*builder);
-        let mut statement = schema.create_table_from_entity(Self);
-
-        builder.build(statement.if_not_exists())
-    }
 }

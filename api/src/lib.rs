@@ -1,5 +1,6 @@
 mod archive;
 mod config;
+mod entry;
 mod minecraft_mod;
 
 use actix_cors::Cors;
@@ -44,7 +45,7 @@ pub async fn start() -> std::io::Result<()> {
     HttpServer::new(move || {
         App::new()
             .app_data(Data::clone(&app_state))
-             .wrap(middleware::Logger::default())
+            .wrap(middleware::Logger::default())
             .wrap(Cors::permissive())
             .default_service(web::route().to(not_found))
             .configure(init)
@@ -57,6 +58,7 @@ pub async fn start() -> std::io::Result<()> {
 fn init(cfg: &mut web::ServiceConfig) {
     cfg.service(web::scope("/archives").configure(archive::init));
     cfg.service(web::scope("/mods").configure(minecraft_mod::init));
+    cfg.service(web::scope("/entry").configure(entry::init));
 }
 
 async fn not_found() -> impl Responder {

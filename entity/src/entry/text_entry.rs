@@ -1,14 +1,12 @@
-use sea_orm::{entity::prelude::*, DatabaseBackend, Schema, Statement};
+use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    database_initializer::DatabaseInitializer, minecraft::mod_loader::ModLoaderVec, misc::StringVec,
-};
+use crate::{minecraft::mod_loader::ModLoaderVec, misc::StringVec, translation::text_translation};
 
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel, Deserialize, Serialize)]
 #[sea_orm(table_name = "text_entry")]
 pub struct Model {
-    #[sea_orm(primary_key, auto_increment = false, column_type = "Text")]
+    #[sea_orm(primary_key, auto_increment = false)]
     pub key: String,
     #[sea_orm(column_type = "Text")]
     pub value: String,
@@ -27,6 +25,8 @@ pub enum Relation {
         to = "crate::minecraft::minecraft_mod::Column::Id"
     )]
     MinecraftMod,
+    #[sea_orm(has_many = "crate::translation::text_translation::Entity")]
+    TextTranslation,
 }
 
 impl Related<crate::minecraft::minecraft_mod::Entity> for Entity {
@@ -35,13 +35,10 @@ impl Related<crate::minecraft::minecraft_mod::Entity> for Entity {
     }
 }
 
-impl ActiveModelBehavior for ActiveModel {}
-
-impl DatabaseInitializer for Entity {
-    fn initialize(builder: &DatabaseBackend) -> Statement {
-        let schema = Schema::new(*builder);
-        let mut statement = schema.create_table_from_entity(Self);
-
-        builder.build(statement.if_not_exists())
+impl Related<text_translation::Entity> for Entity {
+    fn to() -> RelationDef {
+        Relation::TextTranslation.def()
     }
 }
+
+impl ActiveModelBehavior for ActiveModel {}

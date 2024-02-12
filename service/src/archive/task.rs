@@ -9,12 +9,17 @@ use std::{
 
 use entity::{
     entry::text_entry,
-    minecraft::{mod_loader::{ModLoader, ModLoaderVec}, minecraft_mod},
+    minecraft::{
+        minecraft_mod,
+        mod_loader::{ModLoader, ModLoaderVec},
+    },
     misc::StringVec,
 };
+use futures::StreamExt;
 use lazy_static::lazy_static;
 use sea_orm::{sea_query::OnConflict, DatabaseConnection, EntityTrait, Set};
 use serde::Serialize;
+use tokio::sync::mpsc;
 use zip::ZipArchive;
 
 use super::resource::ModDownloadInfo;
@@ -71,41 +76,43 @@ pub fn remove_task(task_id: &str) {
 }
 
 pub async fn download_files(
-    downloads: &[ModDownloadInfo],
+    downloads: Vec<ModDownloadInfo>,
     max_simultaneous_downloads: usize,
     progress_changed: impl Fn(f32),
-) -> anyhow::Result<()> {
+) -> anyhow::Result<Vec<ModDownloadInfo>> {
     let total_size: usize = downloads.iter().map(|x| x.size).sum();
     let mut downloaded_size = 0;
+    {
+        create_dir_all(get_archives_directory())?;
 
-    create_dir_all(get_archives_directory())?;
+        let (tx, mut rx) = mpsc::unbounded_channel();
 
-    for chuck in downloads.chunks(max_simultaneous_downloads) {
-        let mut handles = Vec::with_capacity(chuck.len());
-
-        for (index, info) in chuck.iter().enumerate() {
-            let url = info.url.clone();
-            let path = info.path.clone();
-
-            let handle = tokio::spawn(async move {
+        let handles = downloads.iter().map(|info| {
+            let tx = tx.clone();
+            async move {
+                let url = &info.url;
+                let path = &info.path;
                 let bytes = reqwest::get(url).await?.bytes().await?;
                 tokio::fs::write(path, bytes).await?;
+                tx.send(info.size)?;
 
-                Ok::<_, anyhow::Error>(index)
-            });
-            handles.push(handle);
-        }
+                Ok::<_, anyhow::Error>(())
+            }
+        });
 
-        for handle in handles {
-            let index = handle.await??;
-            let info = chuck.get(index).unwrap();
+        let mut stream = tokio_stream::iter(handles).buffer_unordered(max_simultaneous_downloads);
 
-            downloaded_size += info.size;
+        while let Some(x) = stream.next().await {
+            x?;
+            let Some(download_size) = rx.recv().await else {
+                continue;
+            };
+            downloaded_size += download_size;
             progress_changed(downloaded_size as f32 / total_size as f32);
         }
     }
 
-    Ok(())
+    Ok(downloads)
 }
 
 #[derive(Debug)]

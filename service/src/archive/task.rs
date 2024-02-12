@@ -19,7 +19,6 @@ use futures::StreamExt;
 use lazy_static::lazy_static;
 use sea_orm::{sea_query::OnConflict, DatabaseConnection, EntityTrait, Set};
 use serde::Serialize;
-use tokio::sync::mpsc;
 use zip::ZipArchive;
 
 use super::resource::ModDownloadInfo;
@@ -82,35 +81,26 @@ pub async fn download_files(
 ) -> anyhow::Result<()> {
     let total_size: usize = downloads.iter().map(|x| x.size).sum();
     let mut downloaded_size = 0;
-    {
-        create_dir_all(get_archives_directory())?;
+    create_dir_all(get_archives_directory())?;
 
-        let (tx, mut rx) = mpsc::unbounded_channel();
+    let mut handles = Vec::new();
+    for info in downloads {
+        let url = &info.url;
+        let path = &info.path;
+        handles.push(async move {
+            let bytes = reqwest::get(url).await?.bytes().await?;
+            tokio::fs::write(path, bytes).await?;
 
-        let mut handles = Vec::new();
-        for info in downloads {
-            let url = &info.url;
-            let path = &info.path;
-            let tx = tx.clone();
-            handles.push(async move {
-                let bytes = reqwest::get(url).await?.bytes().await?;
-                tokio::fs::write(path, bytes).await?;
-                tx.send(info.size)?;
+            Ok::<_, anyhow::Error>(info.size)
+        })
+    }
 
-                Ok::<_, anyhow::Error>(())
-            })
-        }
+    let mut stream = tokio_stream::iter(handles).buffer_unordered(max_simultaneous_downloads);
 
-        let mut stream = tokio_stream::iter(handles).buffer_unordered(max_simultaneous_downloads);
-
-        while let Some(x) = stream.next().await {
-            x?;
-            let Some(download_size) = rx.recv().await else {
-                continue;
-            };
-            downloaded_size += download_size;
-            progress_changed(downloaded_size as f32 / total_size as f32);
-        }
+    while let Some(x) = stream.next().await {
+        let download_size = x?;
+        downloaded_size += download_size;
+        progress_changed(downloaded_size as f32 / total_size as f32);
     }
 
     Ok(())

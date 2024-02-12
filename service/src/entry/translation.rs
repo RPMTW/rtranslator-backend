@@ -1,18 +1,25 @@
-use entity::{entry::text_entry, translation::text_translation};
-use sea_orm::{DatabaseConnection, EntityTrait, Set};
+use entity::{
+    entry::text_entry,
+    translation::{text_translation, translation_flag::TranslationFlagVec},
+};
+use sea_orm::{ActiveModelTrait, ActiveValue::NotSet, DatabaseConnection, DbErr, EntityTrait, Set};
 
-use crate::entry::translation;
+pub async fn get_text_entry(db: &DatabaseConnection, key: String) -> Option<text_entry::Model> {
+    text_entry::Entity::find_by_id(key).one(db).await.ok()?
+}
 
 pub async fn add_translation(
     db: &DatabaseConnection,
     text_entry_key: String,
-) -> Result<text_translation::Model> {
-    let entry = text_entry::Entity::find_by_id(text_entry_key)
-        .one(db)
-        .await?;
-
+    content: String,
+) -> Result<text_translation::Model, DbErr> {
     let model = text_translation::ActiveModel {
-        entry_key: Set(text_entry_key)
-    }
-    todo!()
+        id: NotSet,
+        content: Set(content),
+        flags: Set(TranslationFlagVec(Vec::new())),
+        entry_key: Set(text_entry_key),
+    };
+    let result = model.insert(db).await?;
+
+    Ok(result)
 }

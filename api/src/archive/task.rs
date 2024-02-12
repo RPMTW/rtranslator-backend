@@ -71,23 +71,23 @@ pub async fn create_archive_task(
     }
 
     let task_id_clone = task_id.clone();
-    // tokio::spawn(async move {
-    let result = start_create_task(
-        state.db.clone(),
-        task_id_clone.clone(),
-        payload.provider.clone(),
-        payload.identifier.clone(),
-        state.config.max_simultaneous_downloads,
-    )
-    .await;
+    tokio::spawn(async move {
+        let result = start_create_task(
+            state.db.clone(),
+            task_id_clone.clone(),
+            payload.provider.clone(),
+            payload.identifier.clone(),
+            state.config.max_simultaneous_downloads,
+        )
+        .await;
 
-    if let Err(err) = result {
-        let mut tasks = ARCHIVE_TASKS.lock().unwrap();
-        let task = tasks.get_mut(&task_id_clone).unwrap();
-        task.stage = ArchiveTaskStage::Failed;
-        warn!("Execute archive task failed: {:?}", err);
-    }
-    // });
+        if let Err(err) = result {
+            let mut tasks = ARCHIVE_TASKS.lock().unwrap();
+            let task = tasks.get_mut(&task_id_clone).unwrap();
+            task.stage = ArchiveTaskStage::Failed;
+            warn!("Execute archive task failed: {:?}", err);
+        }
+    });
 
     Ok(task_id)
 }
@@ -138,7 +138,7 @@ async fn start_create_task<'a>(
 
     let task_id_clone = task_id.clone();
 
-    let downloads = download_files(downloads, max_simultaneous_downloads, |progress| {
+    download_files(&downloads, max_simultaneous_downloads, |progress| {
         update_task_progress(&task_id_clone, None, 0.1 + progress * 0.75)
     })
     .await?;

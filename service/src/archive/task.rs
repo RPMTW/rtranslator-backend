@@ -76,10 +76,10 @@ pub fn remove_task(task_id: &str) {
 }
 
 pub async fn download_files(
-    downloads: Vec<ModDownloadInfo>,
+    downloads: &[ModDownloadInfo],
     max_simultaneous_downloads: usize,
     progress_changed: impl Fn(f32),
-) -> anyhow::Result<Vec<ModDownloadInfo>> {
+) -> anyhow::Result<()> {
     let total_size: usize = downloads.iter().map(|x| x.size).sum();
     let mut downloaded_size = 0;
     {
@@ -87,18 +87,19 @@ pub async fn download_files(
 
         let (tx, mut rx) = mpsc::unbounded_channel();
 
-        let handles = downloads.iter().map(|info| {
+        let mut handles = Vec::new();
+        for info in downloads {
+            let url = &info.url;
+            let path = &info.path;
             let tx = tx.clone();
-            async move {
-                let url = &info.url;
-                let path = &info.path;
+            handles.push(async move {
                 let bytes = reqwest::get(url).await?.bytes().await?;
                 tokio::fs::write(path, bytes).await?;
                 tx.send(info.size)?;
 
                 Ok::<_, anyhow::Error>(())
-            }
-        });
+            })
+        }
 
         let mut stream = tokio_stream::iter(handles).buffer_unordered(max_simultaneous_downloads);
 
@@ -112,7 +113,7 @@ pub async fn download_files(
         }
     }
 
-    Ok(downloads)
+    Ok(())
 }
 
 #[derive(Debug)]

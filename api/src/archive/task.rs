@@ -122,7 +122,7 @@ pub async fn get_archive_task(
     Err(error::ErrorNotFound("Task not found"))
 }
 
-async fn start_create_task<'a>(
+async fn start_create_task(
     db: DatabaseConnection,
     task_id: String,
     provider: ArchiveProvider,

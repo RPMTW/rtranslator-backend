@@ -9,9 +9,13 @@ use std::{
 
 use entity::{
     entry::text_entry,
-    minecraft::{mod_loader::{ModLoader, ModLoaderVec}, minecraft_mod},
+    minecraft::{
+        minecraft_mod,
+        mod_loader::{ModLoader, ModLoaderVec},
+    },
     misc::StringVec,
 };
+use futures::StreamExt;
 use lazy_static::lazy_static;
 use sea_orm::{sea_query::OnConflict, DatabaseConnection, EntityTrait, Set};
 use serde::Serialize;
@@ -77,32 +81,26 @@ pub async fn download_files(
 ) -> anyhow::Result<()> {
     let total_size: usize = downloads.iter().map(|x| x.size).sum();
     let mut downloaded_size = 0;
-
     create_dir_all(get_archives_directory())?;
 
-    for chuck in downloads.chunks(max_simultaneous_downloads) {
-        let mut handles = Vec::with_capacity(chuck.len());
+    let mut handles = Vec::new();
+    for info in downloads {
+        let url = &info.url;
+        let path = &info.path;
+        handles.push(async move {
+            let bytes = reqwest::get(url).await?.bytes().await?;
+            tokio::fs::write(path, bytes).await?;
 
-        for (index, info) in chuck.iter().enumerate() {
-            let url = info.url.clone();
-            let path = info.path.clone();
+            Ok::<_, anyhow::Error>(info.size)
+        })
+    }
 
-            let handle = tokio::spawn(async move {
-                let bytes = reqwest::get(url).await?.bytes().await?;
-                tokio::fs::write(path, bytes).await?;
+    let mut stream = tokio_stream::iter(handles).buffer_unordered(max_simultaneous_downloads);
 
-                Ok::<_, anyhow::Error>(index)
-            });
-            handles.push(handle);
-        }
-
-        for handle in handles {
-            let index = handle.await??;
-            let info = chuck.get(index).unwrap();
-
-            downloaded_size += info.size;
-            progress_changed(downloaded_size as f32 / total_size as f32);
-        }
+    while let Some(x) = stream.next().await {
+        let download_size = x?;
+        downloaded_size += download_size;
+        progress_changed(downloaded_size as f32 / total_size as f32);
     }
 
     Ok(())

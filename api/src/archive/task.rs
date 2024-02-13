@@ -136,8 +136,10 @@ async fn start_create_task(
     // Downloading mod files.
     update_task_progress(&task_id, Some(ArchiveTaskStage::Downloading), 0.1);
 
+    let task_id_clone = task_id.clone();
+
     download_files(&downloads, max_simultaneous_downloads, |progress| {
-        update_task_progress(&task_id, None, 0.1 + progress * 0.75)
+        update_task_progress(&task_id_clone, None, 0.1 + progress * 0.75)
     })
     .await?;
 
